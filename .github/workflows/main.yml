@@ -1,4 +1,4 @@
-name: RDP-Infinite
+name: RDP-Standard
 
 on:
   workflow_dispatch:
@@ -6,14 +6,13 @@ on:
 jobs:
   secure-rdp:
     runs-on: windows-latest
-    # Define a high timeout. 3600 is 1 hour, which is safe. 
-    # Some plans allow more, but 3600 is a good balance.
-    timeout-minutes: 3600 
+    # Define um timeout alto para permitir uso prolongado sem cancelamento prematuro.
+    # O padrão do GitHub é 360 min (6h), mas alguns planos aceitam mais.
+    timeout-minutes: 360 
 
     steps:
       - name: Configure Core RDP Settings
         run: |
-          # Disable firewall/RDP restrictions
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
                              -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
@@ -21,7 +20,6 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
                              -Name "SecurityLayer" -Value 0 -Force
 
-          # Allow RDP through firewall on port 3389
           netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
           netsh advfirewall firewall add rule name="RDP-Tailscale" `
             dir=in action=allow protocol=TCP localport=3389
@@ -95,38 +93,26 @@ jobs:
 
       - name: Install Roblox Player
         run: |
-          # Download Roblox installer (using the latest official URL structure)
-          $robloxInstallerUrl = "https://client.cdn.rbxcdn.com/RobloxPlayerBeta.msi" # Placeholder, actual URL varies
-          # Better approach: Use the web installer which handles components
-          $webInstallerUrl = "https://www.roblox.com/download/client"
-          $installerPath = "$env:TEMP\roblox_installer.exe"
-          
-          # Note: Roblox installation can be complex. For a quick setup in CI, 
-          # we often just install the player. However, the MSI is deprecated.
-          # We will use the web installer and wait for it to finish.
+          $robloxInstallerUrl = "https://client.roblox.com/v1/unix-client-download/windows/production"
+          $installerPath = "$env:TEMP\roblox_setup.exe"
           
           try {
-              Invoke-WebRequest -Uri $webInstallerUrl -OutFile $installerPath
-              # Run silently
+              Write-Host "Downloading Roblox Installer..."
+              Invoke-WebRequest -Uri $robloxInstallerUrl -OutFile $installerPath
+              
+              Write-Host "Installing Roblox..."
               Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait
               Write-Host "Roblox installed successfully."
           } catch {
-              Write-Warning "Roblox installation might have issues, continuing anyway."
+              Write-Warning "Failed to install Roblox: $_"
           } finally {
-              Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
-          }
-
-      - name: Keep Runner Alive (Infinite Loop)
-        run: |
-          # This step ensures the job stays active and doesn't finish immediately.
-          # It runs for a very long time (effectively until the timeout kills it).
-          # This prevents GitHub from thinking the job is "done" prematurely.
-          Write-Host "Keeping runner alive..."
-          $count = 0
-          while ($true) {
-              Start-Sleep -Seconds 60
-              $count++
-              if ($count % 10 -eq 0) {
-                  Write-Host "Alive... $(Get-Date)"
+              if (Test-Path $installerPath) {
+                  Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
               }
           }
+
+      - name: Final Cleanup and Exit
+        run: |
+          Write-Host "Setup complete. Runner will remain active until the timeout (${env:RUNNER_TIMEOUT_MINUTES} minutes) or manual cancellation."
+          # Opcional: Se quiser que ele feche *imediatamente* após instalar, remova esta etapa 
+          # ou adicione um 'exit 0' aqui. Mas manter o runner vivo por um tempo permite que você conecte no RDP tranquilamente.
